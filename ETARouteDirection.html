@@ -1,0 +1,64 @@
+<html>
+<head>
+    <title>Bus ETA</title>
+</head>
+<body>
+  <div id="eta-container">Loading...</div>
+<script>
+const rtstop = "https://data.etabus.gov.hk/v1/transport/kmb/route-stop/71K/outbound/1";
+const eta = "https://data.etabus.gov.hk/v1/transport/kmb/route-eta/71K/1";
+const stops = "https://data.etabus.gov.hk/v1/transport/kmb/stop"
+Promise.all([
+    fetch(rtstop).then(res => res.json()),
+    fetch(eta).then(res => res.json()),
+    fetch(stops).then(res => res.json())
+])
+    .then(([RtstopResponse, etaResponse,StopResponse]) => {
+        console.log("車站列表資料：", RtstopResponse);
+        console.log("到站時間資料：", etaResponse);
+        console.log("站名資料：", StopResponse);
+        const container = document.getElementById('eta-container');
+        container.innerHTML = '';
+        if (etaResponse.data && etaResponse.data.length > 0) {
+            const mainRoute = etaResponse.data[0].route;
+            const mainDest =etaResponse.data[0].dest_tc;
+            container.innerHTML = '<h1>' + mainRoute + ' 往 ' + mainDest + '</h1><hr/>';
+        }
+        
+        
+        RtstopResponse.data.forEach(rtStopdata=>{
+            const rt1 = rtStopdata.route;
+            const stop = rtStopdata.stop;
+            const seq = rtStopdata.seq;
+            const dir = rtStopdata.bound;
+            const matchedStop = StopResponse.data.find(StopData => StopData.stop === stop);
+            const stopName = matchedStop ? matchedStop.name_tc : "未知車站";
+
+            const matchedEtas = etaResponse.data.filter(etaData => 
+                etaData.seq === parseInt(seq) && etaData.dir === dir
+            );
+
+            let timesArray = [];
+
+            matchedEtas.forEach(etadata => {
+                if (etadata.eta) {
+                    const time = new Date(etadata.eta).toLocaleTimeString("it-IT", {hour: '2-digit', minute:'2-digit'});
+                    timesArray.push(time);
+                }
+            });
+
+            const finalTimeText = timesArray.length > 0 ? timesArray.join(' | ') : '暫無班次';
+
+            container.innerHTML += seq + ' <strong>' + stopName + '</strong>  ' + finalTimeText + '</br>';
+        })
+ 
+
+    })
+    .catch((error) => {
+        console.log(`Error: ${error}`);
+    })
+
+</script>
+</body>
+
+</html>

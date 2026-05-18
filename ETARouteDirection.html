@@ -3,60 +3,94 @@
     <title>Bus ETA</title>
 </head>
 <body>
+  <div id="Search">
+    <label for="Route">Route:</label>
+    <input type="text" id="route" value="1"></input>
+    <select id="bound">
+        <option value="outbound">OutBound</option>
+        <option value="inbound">InBuond</option>
+    </select>
+    <button type="button" onclick="searchBus()">Search</button>
+  </div>
   <div id="eta-container">Loading...</div>
 <script>
-const rtstop = "https://data.etabus.gov.hk/v1/transport/kmb/route-stop/71K/outbound/1";
-const eta = "https://data.etabus.gov.hk/v1/transport/kmb/route-eta/71K/1";
-const stops = "https://data.etabus.gov.hk/v1/transport/kmb/stop"
-Promise.all([
-    fetch(rtstop).then(res => res.json()),
-    fetch(eta).then(res => res.json()),
-    fetch(stops).then(res => res.json())
-])
-    .then(([RtstopResponse, etaResponse,StopResponse]) => {
-        console.log("Route Stop Information：", RtstopResponse);
-        console.log("ETA：", etaResponse);
-        console.log("Stop Information：", StopResponse);
-        const container = document.getElementById('eta-container');
-        container.innerHTML = '';
-        if (etaResponse.data && etaResponse.data.length > 0) {
-            const mainRoute = etaResponse.data[0].route;
-            const mainDest =etaResponse.data[0].dest_tc;
-            container.innerHTML = '<h1>' + mainRoute + ' 往 ' + mainDest + '</h1><hr/>';
+    function searchBus(){
+        const inputRoute = document.getElementById('route').value.trim().toUpperCase();
+        const inputBound = document.getElementById('bound').value;
+        if (!inputRoute) {
+            alert("Please enter a route number!");
+            return;
         }
-        
-        
-        RtstopResponse.data.forEach(rtStopdata=>{
-            const rt1 = rtStopdata.route;
-            const stop = rtStopdata.stop;
-            const seq = rtStopdata.seq;
-            const dir = rtStopdata.bound;
-            const matchedStop = StopResponse.data.find(StopData => StopData.stop === stop);
-            const stopName = matchedStop ? matchedStop.name_tc : "Unknown";
-
-            const matchedEtas = etaResponse.data.filter(etaData => 
-                etaData.seq === parseInt(seq) && etaData.dir === dir
-            );
-
-            let timesArray = [];
-
-            matchedEtas.forEach(etadata => {
-                if (etadata.eta) {
-                    const time = new Date(etadata.eta).toLocaleTimeString("it-IT", {hour: '2-digit', minute:'2-digit'});
-                    timesArray.push(time);
+        const rtstop = `https://data.etabus.gov.hk/v1/transport/kmb/route-stop/${inputRoute}/${inputBound}/1`;
+        const eta = `https://data.etabus.gov.hk/v1/transport/kmb/route-eta/${inputRoute}/1`;
+        const stops = "https://data.etabus.gov.hk/v1/transport/kmb/stop/"
+        Promise.all([
+            fetch(rtstop).then(res => res.json()),
+            fetch(eta).then(res => res.json()),
+            fetch(stops).then(res => res.json())
+        ])
+            .then(([RtstopResponse, etaResponse,StopResponse]) => {
+                if (!RtstopResponse.data || RtstopResponse.data.length === 0) {
+                    if (inputBound === "inbound") {
+                        alert("This route no Return trip");
+                        document.getElementById('bound').value = "outbound";
+                        searchBus();
+                        return;
+                    } else {
+                        document.getElementById('eta-container').innerHTML = `<h1>❌ 找不到路線 ${inputRoute} 的資料</h1>`;
+                        return;
+                    }
                 }
-            });
+                console.log("Route Stop Information：", RtstopResponse);
+                console.log("ETA：", etaResponse);
+                console.log("Stop Information：", StopResponse);
+                const container = document.getElementById('eta-container');
+                container.innerHTML = '';
+                if (etaResponse.data && etaResponse.data.length > 0) {
+                    const currentBound = RtstopResponse.data[0].bound;
+                    const mainRoute = RtstopResponse.data[0].route;
+                    const matchedEtaForTitle = etaResponse.data.find(etaData => etaData.dir === currentBound);
+                    const mainDest = matchedEtaForTitle.dest_tc;
+                    const mainDestEn = matchedEtaForTitle.dest_en;
+                    container.innerHTML = '<h1>' + mainRoute + ' 往 ' + mainDest + '<br>'+ mainRoute + ' to ' + mainDestEn + '</h1><hr/>';
+                }
+                
+                
+                RtstopResponse.data.forEach(rtStopdata=>{
+                    const rt1 = rtStopdata.route;
+                    const stop = rtStopdata.stop;
+                    const seq = rtStopdata.seq;
+                    const dir = rtStopdata.bound;
+                    const matchedStop = StopResponse.data.find(StopData => StopData.stop === stop);
+                    const stopName = matchedStop ? matchedStop.name_tc : "Unknown";
+                    const stopNameEn = matchedStop ? matchedStop.name_en : "Unknown";
+                    const matchedEtas = etaResponse.data.filter(etaData => 
+                        etaData.seq === parseInt(seq) && etaData.dir === dir
+                    );
 
-            const finalTimeText = timesArray.length > 0 ? timesArray.join(' | ') : '暫無班次';
+                    let timesArray = [];
 
-            container.innerHTML += seq + ' <strong>' + stopName + '</strong>  ' + finalTimeText + '</br>';
-        })
- 
+                    matchedEtas.forEach(etadata => {
+                        if (etadata.eta) {
+                            const time = new Date(etadata.eta).toLocaleTimeString("it-IT", {hour: '2-digit', minute:'2-digit'});
+                            timesArray.push(time);
+                        }
+                    });
 
-    })
-    .catch((error) => {
-        console.log(`Error: ${error}`);
-    })
+                    const finalTimeText = timesArray.length > 0 ? timesArray.join(' | ') : '暫無班次';
+
+                    container.innerHTML += seq + ' <strong>' + stopName + ' ' + stopNameEn  + '</strong>  ' + finalTimeText + '</br>';
+                })
+        
+
+            })
+            .catch((error) => {
+                console.log(`Error: ${error}`);
+            })
+    }   
+window.onload = function() {
+    searchBus();
+};
 
 </script>
 </body>

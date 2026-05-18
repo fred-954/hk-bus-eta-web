@@ -14,9 +14,9 @@ Promise.all([
     fetch(stops).then(res => res.json())
 ])
     .then(([RtstopResponse, etaResponse,StopResponse]) => {
-        console.log("車站列表資料：", RtstopResponse);
-        console.log("到站時間資料：", etaResponse);
-        console.log("站名資料：", StopResponse);
+        console.log("Route Stop Information：", RtstopResponse);
+        console.log("ETA：", etaResponse);
+        console.log("Stop Information：", StopResponse);
         const container = document.getElementById('eta-container');
         container.innerHTML = '';
         if (etaResponse.data && etaResponse.data.length > 0) {
@@ -32,7 +32,7 @@ Promise.all([
             const seq = rtStopdata.seq;
             const dir = rtStopdata.bound;
             const matchedStop = StopResponse.data.find(StopData => StopData.stop === stop);
-            const stopName = matchedStop ? matchedStop.name_tc : "未知車站";
+            const stopName = matchedStop ? matchedStop.name_tc : "Unknown";
 
             const matchedEtas = etaResponse.data.filter(etaData => 
                 etaData.seq === parseInt(seq) && etaData.dir === dir

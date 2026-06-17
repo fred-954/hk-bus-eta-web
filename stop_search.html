@@ -11,12 +11,32 @@
   <div id="eta-container">請先輸入</div>
   <div id="bus-times-container"></div>
 <script>
+
+    let allStopsGlobal = [];
+
+    function getDistance(lat1, lon1, lat2, lon2) {
+        const R = 6371;
+        const dLat = (lat2 - lat1) * Math.PI / 180;
+        const dLon = (lon2 - lon1) * Math.PI / 180;
+        const a = 
+            Math.sin(dLat/2) * Math.sin(dLat/2) +
+            Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon/2) * Math.sin(dLon/2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+        return R * c;
+    }
+
     function searchStop(){
+        const timeContainer = document.getElementById('bus-times-container');
+        const etaContainer = document.getElementById('eta-container');
+        timeContainer.innerHTML = '正在載入全港車站 GPS 數據...';
+        etaContainer.innerHTML = '';
         const stops = "https://data.etabus.gov.hk/v1/transport/kmb/stop/";
         Promise.all([
             fetch(stops).then(res => res.json())
         ])
         .then(([StopResponse]) => {
+            allStopsGlobal = StopResponse.data;
+
             console.log("Stop Information：", StopResponse);
         
         const inputStop = document.getElementById('stop').value.trim().toUpperCase();
@@ -28,15 +48,20 @@
         if (matchedStops.length === 0){
                 document.getElementById('eta-container').innerHTML = `<h1>找不到資料</h1>`;
                 return;
-            } else {
-                document.getElementById('eta-container').innerHTML = `<h3>找到 ${matchedStops.length} 個車站，請選擇確切位置：</h3>`;
+            } 
+        else if (matchedStops.length === 1) {
+                etaContainer.innerHTML = `<select id="select-stop" style="display:none;"><option value="${matchedStops[0].stop}" selected></option></select>`;
+                getNearbyETA();
+        }
+        else {
                 let htmlContent = `<h3>🔍 找到 ${matchedStops.length} 個車站，請選擇確切位置：</h3>`;
+                document.getElementById('eta-container').innerHTML = `<h3>找到 ${matchedStops.length} 個車站，請選擇確切位置：</h3>`;
                 htmlContent += '<select id="select-stop">';
                 matchedStops.forEach(stopData => {
                     htmlContent += `<option value="${stopData.stop}">${stopData.name_tc}</option>`;
                 });
                 htmlContent += '</select>';
-                htmlContent += '<button type="button" onclick="getStopETA()">查詢此站時間</button>';
+                htmlContent += '<button type="button" onclick="getNearbyETA()">查詢此站時間</button>';
                 document.getElementById('eta-container').innerHTML = htmlContent;
                 return;
             }
@@ -44,62 +69,61 @@
         console.log(matchedStops);
         });   
     }
-    function getStopETA(){
+    function getNearbyETA(){
         const timeContainer = document.getElementById('bus-times-container');
         document.getElementById('bus-times-container').innerHTML = '';
         const selectedStopId = document.getElementById('select-stop').value;
-        const stopEtaApi = `https://data.etabus.gov.hk/v1/transport/kmb/stop-eta/${selectedStopId}`;
+        const anchor = allStopsGlobal.find(s => s.stop === selectedStopId);
+        const nearby = allStopsGlobal.filter(s => getDistance(anchor.lat, anchor.long, s.lat, s.long) <= 0.15);
+        
         timeContainer.innerHTML = '載入中...';
-        Promise.all([
-            fetch(stopEtaApi).then(res => res.json())
-        ]).then(([StopResponse]) => {
-            console.log("Stop Information：", StopResponse);
-            let htmlContent = '';
-            if (!StopResponse.data || StopResponse.data.length === 0) {
-                timeContainer.innerHTML = '<h3>目前此車站沒有即時班次資料。</h3>';
-                return;
-            }
-            const groupedData = {};
 
+        const promises = nearby.map(s => 
+            fetch(`https://data.etabus.gov.hk/v1/transport/kmb/stop-eta/${s.stop}`).then(r => r.json())
+        );
 
-            StopResponse.data.forEach(etaData => {
-                let finalTimeText = "暫無班次";
-                const route = etaData.route;
-                const dest = etaData.dest_tc;
-                const groupKey = `${route}_${dest}`;
-                if (!groupedData[groupKey]) {
-                    groupedData[groupKey] = {
-                        route: route,
-                        dest: dest,
-                        timesArray: []
-                    };
-                }
-                if (etaData.eta) {
-                        const etaTime = new Date(etaData.eta); 
-                        const now = new Date();
-                        const diffMs = etaTime - now; 
-                        const diffMinutes = Math.ceil(diffMs / 1000 / 60);
-                        const absTimeText = etaTime.toLocaleTimeString("it-IT", {
-                            hour: '2-digit', 
-                            minute: '2-digit', 
-                            second: '2-digit'
-                        });
-                        const countdownText = diffMinutes > 0 ? `${diffMinutes} 分鐘` : "即將到站";
-                        finalTimeText = `${absTimeText} (${countdownText})`;
-                        groupedData[groupKey].timesArray.push(finalTimeText);
-                }
-            });
-            Object.values(groupedData).forEach(group => {
-                    let allTimesText = "";
-                    if (group.timesArray.length === 0) {
-                        allTimesText = '<span style="font-weight:normal;">暫無班次</span>';
-                    } else {
-                        allTimesText = `<span style="font-weight:bold;">${group.timesArray.join(" | ")}</span>`;
+        Promise.all(promises).then(results => {
+            const stopGroupedData = {};
+
+            results.forEach((res, index) => {
+                if (!res.data) return;
+                const stopName = nearby[index].name_tc;
+                if (!stopGroupedData[stopName]) stopGroupedData[stopName] = {};
+
+                res.data.forEach(eta => {
+                    const key = `${eta.route}_${eta.dest_tc}`;
+                    if (!stopGroupedData[stopName][key]) {
+                        stopGroupedData[stopName][key] = { route: eta.route, dest: eta.dest_tc, times: [] };
                     }
-                    htmlContent += `🚌 <strong>${group.route}</strong> 往 ${group.dest} ——— ${allTimesText}<br/>`;
+                    if (eta.eta) {
+                        const etaDate = new Date(eta.eta);
+                        const now = new Date();
+                        
+                        const diffMs = etaDate - now;
+                        const diffMinutes = Math.ceil(diffMs / 60000);
+                        
+                        const timeString = etaDate.toLocaleTimeString("en-GB", {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                            second: '2-digit',
+                            hour12: false
+                        });
+                        
+                        const displayTime = diffMinutes > 0 ? `${timeString} (${diffMinutes}分鐘)` : `${timeString} (即將到站)`;
+                        stopGroupedData[stopName][key].times.push(displayTime);
+                    }
+                });
             });
-            timeContainer.innerHTML = htmlContent;
-            return;
+                let htmlContent = '';
+                for (const stopName in stopGroupedData) {
+                    htmlContent += `<h3>${stopName}</h3>`;
+                    for (const key in stopGroupedData[stopName]) {
+                        const item = stopGroupedData[stopName][key];
+                        const timeDisplay = item.times.length > 0 ? item.times.slice(0, 3).join(" | ") : "暫無班次";
+                        htmlContent += `<strong>${item.route}</strong> 往 ${item.dest} <strong>${timeDisplay}</strong><br/>`;
+                    }
+                }
+            timeContainer.innerHTML = htmlContent || '無班次資料';
         });
     }
         

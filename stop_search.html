@@ -54,7 +54,7 @@
                 getNearbyETA();
         }
         else {
-                let htmlContent = `<h3>🔍 找到 ${matchedStops.length} 個車站，請選擇確切位置：</h3>`;
+                let htmlContent = `<h3>找到 ${matchedStops.length} 個車站，請選擇確切位置：</h3>`;
                 document.getElementById('eta-container').innerHTML = `<h3>找到 ${matchedStops.length} 個車站，請選擇確切位置：</h3>`;
                 htmlContent += '<select id="select-stop">';
                 matchedStops.forEach(stopData => {

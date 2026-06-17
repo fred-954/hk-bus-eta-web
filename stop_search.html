@@ -1,0 +1,110 @@
+<html>
+<head>
+    <title>Bus ETA</title>
+</head>
+<body>
+  <div id="Search">
+    <label for="stop">Stop Name:</label>
+    <input type="text" id="stop"></input>
+    <button type="button" onclick="searchStop()">Search</button>
+  </div>
+  <div id="eta-container">請先輸入</div>
+  <div id="bus-times-container"></div>
+<script>
+    function searchStop(){
+        const stops = "https://data.etabus.gov.hk/v1/transport/kmb/stop/";
+        Promise.all([
+            fetch(stops).then(res => res.json())
+        ])
+        .then(([StopResponse]) => {
+            console.log("Stop Information：", StopResponse);
+        
+        const inputStop = document.getElementById('stop').value.trim().toUpperCase();
+        
+        const matchedStops = StopResponse.data.filter(stopData => {
+            return stopData.name_tc.includes(inputStop);
+        });
+
+        if (matchedStops.length === 0){
+                document.getElementById('eta-container').innerHTML = `<h1>找不到資料</h1>`;
+                return;
+            } else {
+                document.getElementById('eta-container').innerHTML = `<h3>找到 ${matchedStops.length} 個車站，請選擇確切位置：</h3>`;
+                let htmlContent = `<h3>🔍 找到 ${matchedStops.length} 個車站，請選擇確切位置：</h3>`;
+                htmlContent += '<select id="select-stop">';
+                matchedStops.forEach(stopData => {
+                    htmlContent += `<option value="${stopData.stop}">${stopData.name_tc}</option>`;
+                });
+                htmlContent += '</select>';
+                htmlContent += '<button type="button" onclick="getStopETA()">查詢此站時間</button>';
+                document.getElementById('eta-container').innerHTML = htmlContent;
+                return;
+            }
+
+        console.log(matchedStops);
+        });   
+    }
+    function getStopETA(){
+        const timeContainer = document.getElementById('bus-times-container');
+        document.getElementById('bus-times-container').innerHTML = '';
+        const selectedStopId = document.getElementById('select-stop').value;
+        const stopEtaApi = `https://data.etabus.gov.hk/v1/transport/kmb/stop-eta/${selectedStopId}`;
+        timeContainer.innerHTML = '載入中...';
+        Promise.all([
+            fetch(stopEtaApi).then(res => res.json())
+        ]).then(([StopResponse]) => {
+            console.log("Stop Information：", StopResponse);
+            let htmlContent = '';
+            if (!StopResponse.data || StopResponse.data.length === 0) {
+                timeContainer.innerHTML = '<h3>目前此車站沒有即時班次資料。</h3>';
+                return;
+            }
+            const groupedData = {};
+
+
+            StopResponse.data.forEach(etaData => {
+                let finalTimeText = "暫無班次";
+                const route = etaData.route;
+                const dest = etaData.dest_tc;
+                const groupKey = `${route}_${dest}`;
+                if (!groupedData[groupKey]) {
+                    groupedData[groupKey] = {
+                        route: route,
+                        dest: dest,
+                        timesArray: []
+                    };
+                }
+                if (etaData.eta) {
+                        const etaTime = new Date(etaData.eta); 
+                        const now = new Date();
+                        const diffMs = etaTime - now; 
+                        const diffMinutes = Math.ceil(diffMs / 1000 / 60);
+                        const absTimeText = etaTime.toLocaleTimeString("it-IT", {
+                            hour: '2-digit', 
+                            minute: '2-digit', 
+                            second: '2-digit'
+                        });
+                        const countdownText = diffMinutes > 0 ? `${diffMinutes} 分鐘` : "即將到站";
+                        finalTimeText = `${absTimeText} (${countdownText})`;
+                        groupedData[groupKey].timesArray.push(finalTimeText);
+                }
+            });
+            Object.values(groupedData).forEach(group => {
+                    let allTimesText = "";
+                    if (group.timesArray.length === 0) {
+                        allTimesText = '<span style="font-weight:normal;">暫無班次</span>';
+                    } else {
+                        allTimesText = `<span style="font-weight:bold;">${group.timesArray.join(" | ")}</span>`;
+                    }
+                    htmlContent += `🚌 <strong>${group.route}</strong> 往 ${group.dest} ——— ${allTimesText}<br/>`;
+            });
+            timeContainer.innerHTML = htmlContent;
+            return;
+        });
+    }
+        
+    
+</script>
+</body>
+
+</html>

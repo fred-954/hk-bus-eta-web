@@ -1,0 +1,220 @@
+<html>
+<head>
+    <title>巴士線共同車站</title>
+</head>
+<body>
+    <div id="search-box">
+        <h3>選擇車站</h3>
+        <input type="text" id="keyword1" placeholder="輸入站名關鍵字">
+        <button onclick="findStops(1)">搜尋車站 1</button>
+        <div id="result1"></div>
+        
+        <input type="text" id="keyword2" placeholder="輸入站名關鍵字">
+        <button onclick="findStops(2)">搜尋車站 2</button>
+        <div id="result2"></div>
+        
+        <button onclick="getCombinedETA()" style="margin-top:20px; font-weight:bold;">查詢兩站共同路線</button>
+    </div>
+    <div id="eta-container">請先輸入</div>
+    <div id="bus-times-container"></div>
+<script>
+
+    let allStopsGlobal = [];
+    let targetStop1 = "";
+    let targetStop2 = "";
+
+    function getDistance(lat1, lon1, lat2, lon2) {
+        const R = 6371;
+        const dLat = (lat2 - lat1) * Math.PI / 180;
+        const dLon = (lon2 - lon1) * Math.PI / 180;
+        const a = 
+            Math.sin(dLat/2) * Math.sin(dLat/2) +
+            Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon/2) * Math.sin(dLon/2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+        return R * c;
+    }
+    async function findStops(num) {
+        const keyword = document.getElementById(`keyword${num}`).value;
+        const response = await fetch("https://data.etabus.gov.hk/v1/transport/kmb/stop/");
+        const allStops = (await response.json()).data;
+        
+        const matched = allStops.filter(s => s.name_tc.includes(keyword));
+        
+        let html = `<select id="select${num}">`;
+        matched.forEach(s => html += `<option value="${s.stop}">${s.name_tc}</option>`);
+        html += `</select>`;
+        document.getElementById(`result${num}`).innerHTML = html;
+    }
+
+    function searchStop(){
+        const timeContainer = document.getElementById('bus-times-container');
+        const etaContainer = document.getElementById('eta-container');
+        timeContainer.innerHTML = '正在載入全港車站 GPS 數據...';
+        etaContainer.innerHTML = '';
+        const stops = "https://data.etabus.gov.hk/v1/transport/kmb/stop/";
+        Promise.all([
+            fetch(stops).then(res => res.json())
+        ])
+        .then(([StopResponse]) => {
+            allStopsGlobal = StopResponse.data;
+
+            console.log("Stop Information：", StopResponse);
+        
+        const inputStop = document.getElementById('stop').value.trim().toUpperCase();
+        
+        const matchedStops = StopResponse.data.filter(stopData => {
+            return stopData.name_tc.includes(inputStop);
+        });
+
+        if (matchedStops.length === 0){
+                document.getElementById('eta-container').innerHTML = `<h1>找不到資料</h1>`;
+                return;
+            } 
+        else if (matchedStops.length === 1) {
+                etaContainer.innerHTML = `<select id="select-stop" style="display:none;"><option value="${matchedStops[0].stop}" selected></option></select>`;
+                getNearbyETA();
+        }
+        else {
+                let htmlContent = `<h3>找到 ${matchedStops.length} 個車站，請選擇確切位置：</h3>`;
+                document.getElementById('eta-container').innerHTML = `<h3>找到 ${matchedStops.length} 個車站，請選擇確切位置：</h3>`;
+                htmlContent += '<select id="select-stop">';
+                matchedStops.forEach(stopData => {
+                    htmlContent += `<option value="${stopData.stop}">${stopData.name_tc}</option>`;
+                });
+                htmlContent += '</select>';
+                htmlContent += '<button type="button" onclick="getNearbyETA()">查詢此站時間</button>';
+                document.getElementById('eta-container').innerHTML = htmlContent;
+                return;
+            }
+        });   
+    }
+	
+    async function getCombinedETA() {
+        const stopId1 = document.getElementById("select1").value;
+        const stopId2 = document.getElementById("select2").value;
+
+if (!stopId1 || !stopId2) {
+        alert("請先搜尋並選擇兩個車站");
+        return;
+    }
+
+    const timeContainer = document.getElementById('bus-times-container');
+    timeContainer.innerHTML = '載入中...';
+
+    
+    const urls = [
+        `https://data.etabus.gov.hk/v1/transport/kmb/stop-eta/${stopId1}`,
+        `https://data.etabus.gov.hk/v1/transport/kmb/stop-eta/${stopId2}`
+    ];
+
+    try {
+        const results = await Promise.all(urls.map(url => fetch(url).then(r => r.json())));
+        const name1 = document.getElementById("select1").options[document.getElementById("select1").selectedIndex].text;
+        const name2 = document.getElementById("select2").options[document.getElementById("select2").selectedIndex].text;
+        
+        renderETA(results, [name1, name2]);
+    } catch (error) {
+        timeContainer.innerHTML = '無法讀取班次資料';
+    }
+}
+
+function renderETA(results, stopNames) {
+    const timeContainer = document.getElementById('bus-times-container');
+    const dataMap = {};
+
+    results.forEach((res, index) => {
+        if (!res.data) return;
+        res.data.forEach(eta => {
+            const routeKey = `${eta.route}_${eta.dest_tc}`;
+            if (!dataMap[routeKey]) dataMap[routeKey] = { stop1: [], stop2: [] };
+            
+            if (eta.eta) {
+                const timeStr = new Date(eta.eta).toLocaleTimeString("en-GB", { hour: '2-digit', minute: '2-digit' });
+                dataMap[routeKey][index === 0 ? 'stop1' : 'stop2'].push(timeStr);
+            }
+        });
+    });
+
+    let htmlContent = '<h3>共同路線查詢結果：</h3>';
+    let found = false;
+
+    for (const [key, stops] of Object.entries(dataMap)) {
+        //if (stops.stop1.length > 0 && stops.stop2.length > 0) {
+            found = true;
+            const times1 = stops.stop1.length > 0 ? stops.stop1.join(", ") : "暫無班次";
+            const times2 = stops.stop2.length > 0 ? stops.stop2.join(", ") : "暫無班次";
+            const [route, dest] = key.split('_');
+            htmlContent += `<div style="margin-bottom: 15px;">
+                <strong>${route} 往 ${dest}</strong><br>
+                ${stopNames[0]}: ${times1}<br>
+                ${stopNames[1]}: ${times2}
+            </div><hr>`;
+        //}
+    }
+
+    timeContainer.innerHTML = found ? htmlContent : "兩站沒有共同路線";
+}
+
+    function getNearbyETA(){
+        const timeContainer = document.getElementById('bus-times-container');
+        document.getElementById('bus-times-container').innerHTML = '';
+        const selectedStopId = document.getElementById('select-stop').value;
+        const anchor = allStopsGlobal.find(s => s.stop === selectedStopId);
+        const nearby = allStopsGlobal.filter(s => getDistance(anchor.lat, anchor.long, s.lat, s.long) <= 0.15);
+        
+        timeContainer.innerHTML = '載入中...';
+
+        const promises = nearby.map(s => 
+            fetch(`https://data.etabus.gov.hk/v1/transport/kmb/stop-eta/${s.stop}`).then(r => r.json())
+        );
+
+        Promise.all(promises).then(results => {
+            const stopGroupedData = {};
+
+            results.forEach((res, index) => {
+                if (!res.data) return;
+                const stopName = nearby[index].name_tc;
+                if (!stopGroupedData[stopName]) stopGroupedData[stopName] = {};
+
+                res.data.forEach(eta => {
+                    const key = `${eta.route}_${eta.dest_tc}`;
+                    if (!stopGroupedData[stopName][key]) {
+                        stopGroupedData[stopName][key] = { route: eta.route, dest: eta.dest_tc, times: [] };
+                    }
+                    if (eta.eta) {
+                        const etaDate = new Date(eta.eta);
+                        const now = new Date();
+                        
+                        const diffMs = etaDate - now;
+                        const diffMinutes = Math.ceil(diffMs / 60000);
+                        
+                        const timeString = etaDate.toLocaleTimeString("en-GB", {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                            second: '2-digit',
+                            hour12: false
+                        });
+                        
+                        const displayTime = diffMinutes > 0 ? `${timeString} (${diffMinutes}分鐘)` : `${timeString} (即將到站)`;
+                        stopGroupedData[stopName][key].times.push(displayTime);
+                    }
+                });
+            });
+                let htmlContent = '';
+                for (const stopName in stopGroupedData) {
+                    htmlContent += `<h3>${stopName}</h3>`;
+                    for (const key in stopGroupedData[stopName]) {
+                        const item = stopGroupedData[stopName][key];
+                        const timeDisplay = item.times.length > 0 ? item.times.slice(0, 3).join(" | ") : "暫無班次";
+                        htmlContent += `<strong>${item.route}</strong> 往 ${item.dest} <strong>${timeDisplay}</strong><br/>`;
+                    }
+                }
+            timeContainer.innerHTML = htmlContent || '無班次資料';
+        });
+    }
+        
+    
+</script>
+</body>
+
+</html>
